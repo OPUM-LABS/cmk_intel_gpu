@@ -1,0 +1,68 @@
+[
+  {
+    "period": {
+      "duration": 999.85,
+      "unit": "ms"
+    },
+    "frequency": {
+      "requested": 2450.0,
+      "actual": 1290.0,
+      "unit": "MHz"
+    },
+    "interrupts": {
+      "count": 36.0,
+      "unit": "irq/s"
+    },
+    "rc6": {
+      "value": 23.0,
+      "unit": "%"
+    },
+    "power": {
+      "GPU": 18.4,
+      "Package": 25.2,
+      "unit": "W"
+    },
+    "engines": {
+      "Render/3D": {
+        "busy": 0.00,
+        "sema": 0.00,
+        "wait": 0.00,
+        "unit": "%"
+      },
+      "Blitter": {
+        "busy": 0.00,
+        "sema": 0.00,
+        "wait": 0.00,
+        "unit": "%"
+      },
+      "Video": {
+        "busy": 2.25,
+        "sema": 0.00,
+        "wait": 0.00,
+        "unit": "%"
+      },
+      "VideoEnhance": {
+        "busy": 1.26,
+        "sema": 0.00,
+        "wait": 0.00,
+        "unit": "%"
+      },
+      "Compute": {
+        "busy": 0.00,
+        "sema": 0.00,
+        "wait": 0.00,
+        "unit": "%"
+      }
+    },
+    "clients": {
+      "1": {
+        "name": "Plex Transcoder",
+        "pid": "661857"
+      },
+      "2": {
+        "name": "Plex Transcoder",
+        "pid": "1129571"
+      }
+    }
+  }
+]

@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Checkmk Agent Plugin: cmk_intel_gpu
+# ==============================================================================
+# Collects Intel GPU metrics in JSON format for the Checkmk server.
+# Compatible with Intel Arc A380, iGPUs, and discrete Intel GPUs.
+# ==============================================================================
+
+set -u
+
+# Optional configuration file deployed by bakery or manual config
+[ -r "/etc/check_mk/cmk_intel_gpu.cfg" ] && . "/etc/check_mk/cmk_intel_gpu.cfg"
+[ -r "/etc/check_mk/intel_gpu_top.cfg" ] && . "/etc/check_mk/intel_gpu_top.cfg"
+
+# Device configuration (empty = auto-detect Intel GPU)
+DEVICE="${INTEL_GPU_DEVICE:-}"
+
+# Check for intel_gpu_top
+command -v intel_gpu_top >/dev/null 2>&1 || exit 0
+
+# Check permissions: if not root and sudo is available without password, use it
+CMD_PREFIX=""
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        CMD_PREFIX="sudo -n"
+    fi
+fi
+
+# Format device argument if explicitly configured and exists
+DEV_ARG=""
+if [ -n "${DEVICE}" ] && [ "${DEVICE}" != "auto" ]; then
+    if [[ "$DEVICE" == drm:* ]] || [[ "$DEVICE" == sys:* ]] || [[ "$DEVICE" == pci:* ]]; then
+        DEV_ARG="$DEVICE"
+    elif [[ "$DEVICE" == /dev/dri/* ]]; then
+        [ -e "$DEVICE" ] && DEV_ARG="drm:$DEVICE"
+    elif [[ "$DEVICE" == card* ]]; then
+        [ -e "/dev/dri/$DEVICE" ] && DEV_ARG="drm:/dev/dri/$DEVICE"
+    else
+        [ -e "/dev/dri/$DEVICE" ] && DEV_ARG="drm:/dev/dri/$DEVICE"
+    fi
+fi
+
+ARGS=(-J -s 1000)
+[ -n "${DEV_ARG}" ] && ARGS+=(-d "${DEV_ARG}")
+
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="timeout -k 1s -s INT 2.5s"
+fi
+
+RAW_JSON=$(${TIMEOUT_CMD} ${CMD_PREFIX} intel_gpu_top "${ARGS[@]}" 2>/dev/null)
+
+# Auto-recovery: if a specific device argument failed, fallback to automatic detection
+if [ -z "${RAW_JSON}" ] && [ -n "${DEV_ARG}" ]; then
+    RAW_JSON=$(${TIMEOUT_CMD} ${CMD_PREFIX} intel_gpu_top -J -s 1000 2>/dev/null)
+fi
+
+if [ -n "${RAW_JSON}" ] && [[ "${RAW_JSON}" =~ \{ ]]; then
+    # Ensure enclosed in brackets if intel_gpu_top was interrupted mid-stream
+    if ! [[ "${RAW_JSON}" =~ ^[[:space:]]*\[ ]]; then
+        RAW_JSON="[${RAW_JSON%,}]"
+    elif ! [[ "${RAW_JSON}" =~ \][[:space:]]*$ ]]; then
+        RAW_JSON="${RAW_JSON%,}]"
+    fi
+    echo "<<<cmk_intel_gpu:sep(0)>>>"
+    echo "CONFIG:REPORT_ENGINES=${REPORT_ENGINES:-1}:REPORT_FREQUENCY=${REPORT_FREQUENCY:-1}:REPORT_RC6=${REPORT_RC6:-1}:REPORT_INTERRUPTS=${REPORT_INTERRUPTS:-1}:REPORT_POWER=${REPORT_POWER:-1}:REPORT_CLIENTS=${REPORT_CLIENTS:-1}"
+    echo "${RAW_JSON}"
+fi

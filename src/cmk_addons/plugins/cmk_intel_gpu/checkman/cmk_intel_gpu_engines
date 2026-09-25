@@ -1,0 +1,16 @@
+title: Intel GPU Engine Utilization
+agents: linux
+catalog: os/hardware
+license: GPL
+distribution: check_mk
+description:
+ Monitors the utilization percentage of Intel GPU hardware engines (Render/3D, Blitter, Video, VideoEnhance, Compute) via intel_gpu_top telemetry.
+
+item:
+ The name of the GPU engine, e.g. "Render/3D", "Video", "Compute".
+
+examples:
+ # Set custom warning (85%) and critical (95%) thresholds
+ checkgroup_parameters:cmk_intel_gpu_engines = {
+     "levels": (85.0, 95.0),
+ }
