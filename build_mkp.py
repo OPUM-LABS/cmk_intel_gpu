@@ -16,7 +16,7 @@ import pprint
 import tarfile
 
 PKG_NAME = "cmk_intel_gpu"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 TITLE = "Intel GPU Monitoring (cmk_intel_gpu)"
 AUTHOR = "OPUM-LABS"
 DESCRIPTION = (

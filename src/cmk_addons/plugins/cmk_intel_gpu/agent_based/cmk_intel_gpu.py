@@ -395,13 +395,23 @@ def check_cmk_intel_gpu_clients(
         clients = {}
 
     client_list = []
+    name_counts: Dict[str, int] = {}
     for cid, cinfo in clients.items():
-        name = cinfo.get("name", "Unknown")
+        name = cinfo.get("name") or "Unknown"
         pid = cinfo.get("pid", "?")
         client_list.append(f"{name} (PID: {pid})")
+        name_counts[name] = name_counts.get(name, 0) + 1
 
     count = len(client_list)
     levels_upper = _normalize_levels(params.get("levels"))
+
+    if name_counts:
+        sorted_counts = sorted(name_counts.items(), key=lambda x: (-x[1], x[0]))
+        summary_breakdown = " (" + ", ".join(f"{cnt}x {pname}" for pname, cnt in sorted_counts) + ")"
+    else:
+        summary_breakdown = ""
+
+    render_func = lambda v: f"{int(v)}{summary_breakdown}"
 
     try:
         yield from check_levels(
@@ -409,11 +419,11 @@ def check_cmk_intel_gpu_clients(
             levels_upper=levels_upper,
             metric_name="active_clients",
             label="Active client process(es)",
-            render_func=lambda v: str(int(v)),
+            render_func=render_func,
             boundaries=(0.0, None),
         )
     except Exception as e:
-        yield Result(state=State.OK, summary=f"Active client process(es): {count}")
+        yield Result(state=State.OK, summary=f"Active client process(es): {count}{summary_breakdown}")
         yield Metric("active_clients", value=count, boundaries=(0.0, None))
         yield Result(state=State.WARN, notice=f"Client threshold evaluation error: {e}")
 

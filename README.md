@@ -21,8 +21,8 @@ Optimized for **Proxmox VE (PVE)**, media transcode servers (**Plex**, **Jellyfi
   - `Compute` (OpenCL, OneAPI, machine learning & AI inference)
 - **Active Client Process Tracking**:
   - Live metric of active processes utilizing the GPU.
-  - Keeps the service overview clean (e.g. `Active client process(es): 1`).
-  - Detail/notice view lists full process names and PIDs (e.g., `Plex Transcoder (PID: 3258677)`).
+  - Aggregated summary showing process counts (e.g. `Active client process(es): 2 (2x Plex Transcoder)` or `Active client process(es): 3 (2x Plex, 1x Tdarr)`).
+  - Detail/notice view lists individual processes and PIDs (e.g., `Plex Transcoder (PID: 3258677)`).
 - **Core Frequency & Power-Saving**:
   - GPU Core Frequency (Actual vs. Requested clock speed in MHz).
   - RC6 Power-Saving State (measures deep sleep state percentage; e.g. 100% idle down to 0% heavy load).
@@ -44,7 +44,7 @@ Optimized for **Proxmox VE (PVE)**, media transcode servers (**Plex**, **Jellyfi
 
 Two deployment options are provided in this repository:
 
-1. **Official MKP Package** ([`dist/cmk_intel_gpu-1.0.0.mkp`](dist/cmk_intel_gpu-1.0.0.mkp)):
+1. **Official MKP Package** ([`dist/cmk_intel_gpu-1.0.1.mkp`](dist/cmk_intel_gpu-1.0.1.mkp)):
    - Recommended for Checkmk **2.3.0 to 2.5+** (both **Raw Edition** and **Enterprise Edition**).
    - Includes Checkmk agent-based check plugins, WATO GUI rulesets, Perf-O-Meters, metrics definitions, and Agent Bakery integration.
 2. **Standalone Local Check Script** ([`check_cmk_intel_gpu.sh`](check_cmk_intel_gpu.sh)):
@@ -76,13 +76,13 @@ intel_gpu_top -L
 #### Option A — Via Checkmk Web GUI:
 1. In your Checkmk site, go to **Setup** > **Maintenance** > **Extension packages**.
 2. Click **Upload package**.
-3. Select [`dist/cmk_intel_gpu-1.0.0.mkp`](dist/cmk_intel_gpu-1.0.0.mkp) and confirm upload.
+3. Select [`dist/cmk_intel_gpu-1.0.1.mkp`](dist/cmk_intel_gpu-1.0.1.mkp) and confirm upload.
 4. The extension will activate immediately.
 
 #### Option B — Via Checkmk CLI (OMD):
 ```bash
 # As the site user (su - <sitename>)
-mkp install /path/to/cmk_intel_gpu-1.0.0.mkp
+mkp install /path/to/cmk_intel_gpu-1.0.1.mkp
 cmk -R
 ```
 

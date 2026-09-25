@@ -324,15 +324,22 @@ if report_clients:
     clients = sample.get("clients", {})
     if clients and isinstance(clients, dict):
         client_list = []
+        name_counts = {}
         for cid, cinfo in clients.items():
-            name = cinfo.get("name", "Unknown")
+            name = cinfo.get("name") or "Unknown"
             pid = cinfo.get("pid", "?")
             client_list.append(f"{name} (PID {pid})")
+            name_counts[name] = name_counts.get(name, 0) + 1
         c_count = len(client_list)
+        if name_counts:
+            sorted_counts = sorted(name_counts.items(), key=lambda x: (-x[1], x[0]))
+            breakdown = " (" + ", ".join(f"{cnt}x {pname}" for pname, cnt in sorted_counts) + ")"
+        else:
+            breakdown = ""
         long_out = ""
         if report_client_details and client_list:
             long_out = "\\n" + "\\n".join([f"- {item}" for item in client_list])
-        print(f'0 "{prefix} Clients" processes={c_count};;;0;|active_clients={c_count};;;0; {c_count} active client process(es){long_out}')
+        print(f'0 "{prefix} Clients" processes={c_count};;;0;|active_clients={c_count};;;0; {c_count} active client process(es){breakdown}{long_out}')
     elif report_clients:
         print(f'0 "{prefix} Clients" processes=0;;;0;|active_clients=0;;;0; No active client processes')
 EOF
@@ -416,10 +423,12 @@ elif [ "${PARSER}" = "jq" ]; then
         ($s.clients // {}) as $clients |
         ($clients | to_entries) as $clist |
         (if ($clist | length > 0) then
+          ($clist | map(.value.name // "Unknown") | group_by(.) | map({name: .[0], count: length}) | sort_by(-.count)) as $grouped |
+          (if ($grouped | length > 0) then " (" + ($grouped | map("\(.count)x \(.name)") | join(", ")) + ")" else "" end) as $breakdown |
           (if $cldet == 1 then
             "\\n" + ([$clist[] | "- \(.value.name // "Unknown") (PID \(.value.pid // "?"))"] | join("\\n"))
           else "" end) as $longout |
-          "0 \"\($prefix) Clients\" processes=\($clist | length);;;0;|active_clients=\($clist | length);;;0; \($clist | length) active client process(es)\($longout)"
+          "0 \"\($prefix) Clients\" processes=\($clist | length);;;0;|active_clients=\($clist | length);;;0; \($clist | length) active client process(es)\($breakdown)\($longout)"
         else
           "0 \"\($prefix) Clients\" processes=0;;;0;|active_clients=0;;;0; No active client processes"
         end)
