@@ -55,6 +55,7 @@ def parse_cmk_intel_gpu(string_table: StringTable) -> Optional[Dict[str, Any]]:
         "power": True,
         "clients": True,
     }
+    hwmon_power: Dict[str, float] = {}
     json_lines = []
     for row in string_table:
         if not row:
@@ -67,6 +68,15 @@ def parse_cmk_intel_gpu(string_table: StringTable) -> Optional[Dict[str, Any]]:
                     k, v = part.split("=", 1)
                     k = k.lower().replace("report_", "")
                     config[k] = (v.strip() == "1")
+        elif line.startswith("HWMON_POWER:"):
+            parts = line[len("HWMON_POWER:") :].split(":")
+            for part in parts:
+                if "=" in part:
+                    k, v = part.split("=", 1)
+                    try:
+                        hwmon_power[k] = float(v)
+                    except (ValueError, TypeError):
+                        pass
         else:
             json_lines.append(row[0])
 
@@ -129,6 +139,9 @@ def parse_cmk_intel_gpu(string_table: StringTable) -> Optional[Dict[str, Any]]:
 
     if data is not None and isinstance(data, dict):
         data["_config"] = config
+        # Fallback to hwmon power telemetry if intel_gpu_top does not report power (e.g. discrete Arc)
+        if ("power" not in data or not data["power"]) and hwmon_power:
+            data["power"] = {**hwmon_power, "unit": "W"}
         return data
 
     return None

@@ -40,6 +40,51 @@ if [ -n "${DEVICE}" ] && [ "${DEVICE}" != "auto" ]; then
     fi
 fi
 
+# Locate hwmon sensors for Intel GPU (used for discrete Arc power calculation)
+find_hwmon_dir() {
+    local target_dev="${1:-}"
+    if [ -n "$target_dev" ]; then
+        local cname
+        cname=$(basename "$target_dev")
+        for h in /sys/class/drm/"$cname"/device/hwmon/hwmon*; do
+            [ -d "$h" ] && echo "$h" && return
+        done
+    fi
+    for h in /sys/class/drm/card*/device/hwmon/hwmon*; do
+        if [ -d "$h" ] && [ -r "$h/name" ]; then
+            local dname
+            dname=$(cat "$h/name" 2>/dev/null)
+            if [ "$dname" = "i915" ] || [ "$dname" = "xe" ]; then
+                echo "$h"
+                return
+            fi
+        fi
+    done
+    for h in /sys/class/hwmon/hwmon*; do
+        if [ -d "$h" ] && [ -r "$h/name" ]; then
+            local dname
+            dname=$(cat "$h/name" 2>/dev/null)
+            if [ "$dname" = "i915" ] || [ "$dname" = "xe" ]; then
+                echo "$h"
+                return
+            fi
+        fi
+    done
+}
+
+HWMON_DIR=$(find_hwmon_dir "${DEVICE}")
+ENERGY_FILE=""
+if [ -n "$HWMON_DIR" ] && [ -r "$HWMON_DIR/energy1_input" ]; then
+    ENERGY_FILE="$HWMON_DIR/energy1_input"
+fi
+
+E1=""
+T1=""
+if [ -n "$ENERGY_FILE" ]; then
+    E1=$(cat "$ENERGY_FILE" 2>/dev/null)
+    T1=$(date +%s%N 2>/dev/null)
+fi
+
 ARGS=(-J -s 1000)
 [ -n "${DEV_ARG}" ] && ARGS+=(-d "${DEV_ARG}")
 
@@ -55,6 +100,32 @@ if [ -z "${RAW_JSON}" ] && [ -n "${DEV_ARG}" ]; then
     RAW_JSON=$(${TIMEOUT_CMD} ${CMD_PREFIX} intel_gpu_top -J -s 1000 2>/dev/null)
 fi
 
+# Calculate power from hwmon energy delta or power1_average
+HWMON_W=""
+if [ -n "$E1" ] && [ -n "$T1" ] && [ -n "$ENERGY_FILE" ]; then
+    E2=$(cat "$ENERGY_FILE" 2>/dev/null)
+    T2=$(date +%s%N 2>/dev/null)
+    if [ -n "$E2" ] && [ -n "$T2" ]; then
+        HWMON_W=$(awk -v e1="$E1" -v e2="$E2" -v t1="$T1" -v t2="$T2" 'BEGIN {
+            de = e2 - e1
+            dt = (t2 - t1) / 1000000000.0
+            if (dt > 0.1 && de >= 0) {
+                watts = (de / 1000000.0) / dt
+                if (watts >= 0 && watts <= 600) {
+                    printf "%.1f", watts
+                }
+            }
+        }' 2>/dev/null)
+    fi
+fi
+
+if [ -z "$HWMON_W" ] && [ -n "$HWMON_DIR" ] && [ -r "$HWMON_DIR/power1_average" ]; then
+    PA=$(cat "$HWMON_DIR/power1_average" 2>/dev/null)
+    if [ -n "$PA" ] && [ "$PA" -gt 0 ] 2>/dev/null; then
+        HWMON_W=$(awk -v p="$PA" 'BEGIN { printf "%.1f", p / 1000000.0 }' 2>/dev/null)
+    fi
+fi
+
 if [ -n "${RAW_JSON}" ] && [[ "${RAW_JSON}" =~ \{ ]]; then
     # Ensure enclosed in brackets if intel_gpu_top was interrupted mid-stream
     if ! [[ "${RAW_JSON}" =~ ^[[:space:]]*\[ ]]; then
@@ -64,5 +135,8 @@ if [ -n "${RAW_JSON}" ] && [[ "${RAW_JSON}" =~ \{ ]]; then
     fi
     echo "<<<cmk_intel_gpu:sep(0)>>>"
     echo "CONFIG:REPORT_ENGINES=${REPORT_ENGINES:-1}:REPORT_FREQUENCY=${REPORT_FREQUENCY:-1}:REPORT_RC6=${REPORT_RC6:-1}:REPORT_INTERRUPTS=${REPORT_INTERRUPTS:-1}:REPORT_POWER=${REPORT_POWER:-1}:REPORT_CLIENTS=${REPORT_CLIENTS:-1}"
+    if [ -n "${HWMON_W}" ]; then
+        echo "HWMON_POWER:GPU=${HWMON_W}"
+    fi
     echo "${RAW_JSON}"
 fi

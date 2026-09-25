@@ -111,6 +111,51 @@ if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD="timeout -k 1s -s INT ${SAMPLE_DURATION}s"
 fi
 
+# Locate hwmon sensors for Intel GPU (used for discrete Arc power calculation)
+find_hwmon_dir() {
+    local target_dev="${1:-}"
+    if [ -n "$target_dev" ]; then
+        local cname
+        cname=$(basename "$target_dev")
+        for h in /sys/class/drm/"$cname"/device/hwmon/hwmon*; do
+            [ -d "$h" ] && echo "$h" && return
+        done
+    fi
+    for h in /sys/class/drm/card*/device/hwmon/hwmon*; do
+        if [ -d "$h" ] && [ -r "$h/name" ]; then
+            local dname
+            dname=$(cat "$h/name" 2>/dev/null)
+            if [ "$dname" = "i915" ] || [ "$dname" = "xe" ]; then
+                echo "$h"
+                return
+            fi
+        fi
+    done
+    for h in /sys/class/hwmon/hwmon*; do
+        if [ -d "$h" ] && [ -r "$h/name" ]; then
+            local dname
+            dname=$(cat "$h/name" 2>/dev/null)
+            if [ "$dname" = "i915" ] || [ "$dname" = "xe" ]; then
+                echo "$h"
+                return
+            fi
+        fi
+    done
+}
+
+HWMON_DIR=$(find_hwmon_dir "${DEVICE}")
+ENERGY_FILE=""
+if [ -n "$HWMON_DIR" ] && [ -r "$HWMON_DIR/energy1_input" ]; then
+    ENERGY_FILE="$HWMON_DIR/energy1_input"
+fi
+
+E1=""
+T1=""
+if [ -n "$ENERGY_FILE" ]; then
+    E1=$(cat "$ENERGY_FILE" 2>/dev/null)
+    T1=$(date +%s%N 2>/dev/null)
+fi
+
 # Execute intel_gpu_top and capture both stdout and stderr
 TEMP_ERR=$(mktemp 2>/dev/null || echo "/tmp/intel_gpu_top_err.$$")
 RAW_JSON=$(${TIMEOUT_CMD} ${CMD_PREFIX} intel_gpu_top "${ARGS[@]}" 2>"${TEMP_ERR}")
@@ -125,6 +170,32 @@ if [ -z "${RAW_JSON}" ] && [ -n "${DEVICE_ARG}" ]; then
     EXIT_CODE=$?
     STDERR_OUTPUT=$(cat "${TEMP_ERR}" 2>/dev/null)
     rm -f "${TEMP_ERR}"
+fi
+
+# Calculate power from hwmon energy delta or power1_average
+HWMON_W=""
+if [ -n "$E1" ] && [ -n "$T1" ] && [ -n "$ENERGY_FILE" ]; then
+    E2=$(cat "$ENERGY_FILE" 2>/dev/null)
+    T2=$(date +%s%N 2>/dev/null)
+    if [ -n "$E2" ] && [ -n "$T2" ]; then
+        HWMON_W=$(awk -v e1="$E1" -v e2="$E2" -v t1="$T1" -v t2="$T2" 'BEGIN {
+            de = e2 - e1
+            dt = (t2 - t1) / 1000000000.0
+            if (dt > 0.1 && de >= 0) {
+                watts = (de / 1000000.0) / dt
+                if (watts >= 0 && watts <= 600) {
+                    printf "%.1f", watts
+                }
+            }
+        }' 2>/dev/null)
+    fi
+fi
+
+if [ -z "$HWMON_W" ] && [ -n "$HWMON_DIR" ] && [ -r "$HWMON_DIR/power1_average" ]; then
+    PA=$(cat "$HWMON_DIR/power1_average" 2>/dev/null)
+    if [ -n "$PA" ] && [ "$PA" -gt 0 ] 2>/dev/null; then
+        HWMON_W=$(awk -v p="$PA" 'BEGIN { printf "%.1f", p / 1000000.0 }' 2>/dev/null)
+    fi
 fi
 
 # Handle empty output or execution failure
@@ -295,6 +366,11 @@ if report_irq:
 # 5. POWER CONSUMPTION
 if report_power:
     power = sample.get("power", {})
+    if not power and "${HWMON_W}":
+        try:
+            power = {"GPU": float("${HWMON_W}")}
+        except ValueError:
+            pass
     if power:
         p_perf = []
         p_txt = []
@@ -346,6 +422,7 @@ EOF
 
 elif [ "${PARSER}" = "jq" ]; then
     echo "${RAW_JSON}" | jq -r --arg prefix "${SERVICE_PREFIX}" \
+      --arg hwmon_w "${HWMON_W}" \
       --argjson warn "${WARN_BUSY}" \
       --argjson crit "${CRIT_BUSY}" \
       --argjson sep "${REPORT_SEPARATE_ENGINES}" \
@@ -400,21 +477,24 @@ elif [ "${PARSER}" = "jq" ]; then
       else empty end),
 
       # Power
-      (if $pwr == 1 and $s.power then
-        (
-          [
-            (if $s.power.GPU then "power_gpu=\($s.power.GPU);65;75;0;75" else empty end),
-            (if $s.power.Package then "power_package=\($s.power.Package);;;0;" else empty end)
-          ] | join("|")
-        ) as $pperf |
-        (
-          [
-            (if $s.power.GPU then "GPU: \($s.power.GPU) W" else empty end),
-            (if $s.power.Package then "Package: \($s.power.Package) W" else empty end)
-          ] | join(", ")
-        ) as $ptxt |
-        (if ($pperf | length > 0) then
-          "0 \"\($prefix) Power\" \($pperf) Power draw: \($ptxt)"
+      (if $pwr == 1 then
+        (($s.power // {}) + (if ($s.power | not) and ($hwmon_w | length > 0) then {GPU: ($hwmon_w | tonumber)} else {} end)) as $pwr_data |
+        (if ($pwr_data | length > 0) then
+          (
+            [
+              (if $pwr_data.GPU then "power_gpu=\($pwr_data.GPU);65;75;0;75" else empty end),
+              (if $pwr_data.Package then "power_package=\($pwr_data.Package);;;0;" else empty end)
+            ] | join("|")
+          ) as $pperf |
+          (
+            [
+              (if $pwr_data.GPU then "GPU: \($pwr_data.GPU) W" else empty end),
+              (if $pwr_data.Package then "Package: \($pwr_data.Package) W" else empty end)
+            ] | join(", ")
+          ) as $ptxt |
+          (if ($pperf | length > 0) then
+            "0 \"\($prefix) Power\" \($pperf) Power draw: \($ptxt)"
+          else empty end)
         else empty end)
       else empty end),
 
