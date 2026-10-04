@@ -9,6 +9,8 @@ A comprehensive, production-ready Checkmk monitoring extension and agent plugin 
 
 Optimized for **Proxmox VE (PVE)**, media transcode servers (**Plex**, **Jellyfin**, **Emby**, **ffmpeg**), and compute workloads.
 
+![Screenshot](screenshot.png)
+
 ---
 
 ## 📸 Highlights & Visualizations
